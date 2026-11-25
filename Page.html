@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>元素面板</title>
+<link rel="icon" href="/Lib/Icon.png">
+<style>
+/* 莫兰迪色系: 底色 小圆 文字 线条 都是低饱和的暖灰, 选中用陶土色, 大圆的轮廓在 PALETTE 里轮流取色 */
+:root { --bg: #ECE8E1; --card: #FBF9F5; --edge: #CFC7BC; --ink: #5A544D; --line: #A39A8F; --accent: #C97B63; --pick: #EAC9BD; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var( --bg ); }
+svg { display: block; width: 100vw; height: 100vh; user-select: none; -webkit-user-select: none; }
+text { font: 30px "Microsoft YaHei", sans-serif; fill: var( --ink ); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.node ellipse { fill: var( --card ); stroke: var( --edge ); stroke-width: 1.5; filter: url( #shadow ); }
+.node.sel ellipse { stroke: var( --accent ); stroke-width: 3.5; }
+.link .line { fill: none; stroke: var( --line ); stroke-width: 2.5; stroke-linecap: round; }
+.link .head { fill: var( --line ); stroke: var( --line ); stroke-width: 2; stroke-linejoin: round; }
+.link .hit { fill: none; stroke: transparent; stroke-width: 22; }
+.link.sel .line { stroke: var( --accent ); stroke-width: 4; }
+.link.sel .head { fill: var( --accent ); stroke: var( --accent ); }
+.group .area { fill: none; stroke-width: 3; stroke-linejoin: round; pointer-events: none; }
+.group .hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; }
+.group.sel .area { stroke: var( --accent ); stroke-width: 5; }
+#temp { fill: none; stroke: var( --accent ); stroke-width: 2.5; stroke-dasharray: 8 7; stroke-linecap: round; pointer-events: none; }
+#edit, #label { position: fixed; display: none; margin: 0; padding: 0; border: 0; outline: 0; background: transparent; text-align: center; color: var( --ink ); caret-color: var( --ink ); font-family: "Microsoft YaHei", sans-serif; }
+#label { color: var( --line ); caret-color: var( --line ); }
+.link text { font-size: 19px; fill: var( --line ); }   /* 线条上的小字: 和线条同色, 不抢眼 */
+#edit::selection, #label::selection { background: var( --pick ); color: var( --ink ); }
+#formula { position: fixed; display: none; padding: 10px 18px; border-radius: 18px; background: var( --card ); box-shadow: 0 8px 26px rgba( 107, 95, 82, .26 ); }
+math-field { display: block; min-width: 300px; border: 0; outline: 0; background: transparent; color: var( --ink ); font-size: 30px; --caret-color: var( --accent ); --selection-background-color: var( --pick ); --selection-color: var( --ink ); --contains-highlight-background-color: transparent; }
+math-field::part( menu-toggle ), math-field::part( virtual-keyboard-toggle ) { display: none; }
+body { --keyboard-background: #DDD7CE; --keyboard-accent-color: var( --accent ); --keyboard-toolbar-text: var( --ink ); --keyboard-toolbar-text-active: var( --accent ); --keycap-background: var( --card ); --keycap-background-hover: #F3EEE7; --keycap-text: var( --ink ); --keycap-border: var( --edge ); --keycap-border-bottom: var( --edge ); --keycap-secondary-background: #CFC7BC; --keycap-secondary-background-hover: #C5BCB0; --keycap-secondary-text: var( --ink ); --keycap-secondary-border: #BDB3A6; --keycap-secondary-border-bottom: #BDB3A6; }
+#ver, #menu { position: fixed; font-family: "Microsoft YaHei", sans-serif; user-select: none; }
+#ver { left: 12px; top: 12px; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var( --line ); cursor: pointer; }   /* 左上角的齿轮: 单击弹出菜单 */
+#ver:hover, #ver.open { background: var( --card ); color: var( --ink ); box-shadow: 0 4px 14px rgba( 107, 95, 82, .22 ); }
+#ver svg { width: 28px; height: 28px; }
+#ver circle { fill: none; stroke: currentColor; }
+#note { position: fixed; left: 70px; top: 21px; font: 21px "Microsoft YaHei", sans-serif; color: var( --accent ); user-select: none; }   /* 按 Ctrl+S 之后的 已保存: 显示 1.5 秒 */
+#menu { display: none; left: 12px; top: 66px; min-width: 330px; padding: 8px; border-radius: 18px; background: var( --card ); box-shadow: 0 8px 26px rgba( 107, 95, 82, .26 ); font-size: 24px; color: var( --ink ); }
+#menu.open { display: block; }
+#menu .row { display: flex; justify-content: space-between; gap: 48px; padding: 7px 16px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+#menu .row:hover, #menu .title:hover, #menu .title.open { background: var( --bg ); }
+#menu .row { gap: 14px; }
+#menu .row span:first-child { flex: 1; }
+#menu .title { padding: 6px 16px; border-radius: 10px; font-size: 28px; font-weight: bold; white-space: nowrap; cursor: pointer; }   /* 菜单第一行: 当前项目的名字 */
+#menu .side { position: absolute; left: calc( 100% + 10px ); top: 0; min-width: 300px; max-height: calc( 100vh - 90px ); overflow-y: auto; padding: 8px; border-radius: 18px; background: var( --card ); box-shadow: 0 8px 26px rgba( 107, 95, 82, .26 ); }   /* 项目列表: 菜单右边的一块, 一个项目一行, 像标签一样来回切换 */
+#menu .item { align-items: baseline; }   /* 项目名和行尾的小字底边对齐 */
+#menu .item::before { content: ''; flex: none; align-self: center; width: 13px; height: 13px; border-radius: 50%; }   /* 项目列表里的一行; 当前项目前面是绿点 */
+#menu .item.now::before { background: #0BA360; }   /* 宝石绿 */
+#menu .btn { padding: 0 8px; border-radius: 8px; font-size: 20px; color: var( --line ); }   /* 行尾的 重命名 删除 */
+#paint { position: fixed; display: none; padding: 12px; border-radius: 16px; background: var( --card ); box-shadow: 0 8px 26px rgba( 107, 95, 82, .26 ); user-select: none; }   /* 调色盘: 右键单击选中的对象时出现在鼠标旁边 */
+#paint div { display: flex; gap: 8px; }
+#paint b { width: 34px; height: 34px; border-radius: 50%; cursor: pointer; box-sizing: border-box; }
+#paint b:first-child { border: 2px solid var( --edge ); background: linear-gradient( 135deg, transparent 46%, var( --edge ) 46%, var( --edge ) 54%, transparent 54% ); }   /* 第一个圆: 恢复默认的颜色 */
+#paint i { display: block; height: 22px; margin-top: 12px; border-radius: 11px; cursor: pointer; background: linear-gradient( to right, hsl( 0 45% 70% ), hsl( 60 45% 70% ), hsl( 120 45% 70% ), hsl( 180 45% 70% ), hsl( 240 45% 70% ), hsl( 300 45% 70% ), hsl( 360 45% 70% ) ); }   /* 色带: 单击哪里就取哪里的颜色 */
+#drag, #win { position: fixed; top: 0; display: none; }   /* 只在不是全屏的时候出现 */
+body.window #drag { display: block; left: 70px; right: 190px; height: 34px; app-region: drag; }   /* 窗口顶上的一条: 按住拖动窗口 */
+body.window #win { display: flex; right: 10px; top: 10px; gap: 8px; }                              /* 窗口右上角的三个圆按钮: 最小化 最大化 关闭 */
+#win b { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 22px "Microsoft YaHei", sans-serif; color: var( --line ); cursor: pointer; user-select: none; }
+#win svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; pointer-events: none; }
+#win b:hover { background: var( --card ); color: var( --ink ); box-shadow: 0 4px 14px rgba( 107, 95, 82, .22 ); }
+#win b:last-child:hover { background: var( --accent ); color: #fff; }
+#menu .err { padding: 2px 16px 6px; color: #B5533C; font-size: 20px; }
+#menu hr { margin: 6px 10px; border: 0; border-top: 1px solid var( --edge ); }
+#menu input { width: 100%; box-sizing: border-box; padding: 7px 16px; border: 0; outline: 0; border-radius: 10px; background: var( --bg ); color: var( --ink ); font: inherit; }
+#menu input::selection { background: var( --pick ); }
+#about { position: fixed; display: none; left: 50%; top: 50%; transform: translate( -50%, -50% ); min-width: 420px; padding: 44px 56px; border-radius: 26px; background: var( --card ); box-shadow: 0 8px 26px rgba( 107, 95, 82, .26 ); font: 24px "Microsoft YaHei", sans-serif; color: var( --ink ); text-align: center; user-select: text; }   /* 关于: 单击菜单里的 关于 出现在窗口正中, 单击任意地方消失 */
+#about img { width: 96px; }
+#about b { display: block; margin-top: 14px; font-size: 32px; }
+#about div { margin-top: 12px; }
+#about span { color: var( --line ); margin-right: 14px; }
+#about .acts { display: flex; justify-content: center; gap: 16px; margin-top: 26px; }   /* 关于 里的两个按钮: 反馈 打赏 */
+#about .acts b { display: flex; align-items: center; justify-content: center; height: 46px; margin: 0; padding: 0 32px 3px; box-sizing: border-box; line-height: 1; border-radius: 23px; background: var( --bg ); font-size: 24px; font-weight: normal; cursor: pointer; user-select: none; }
+#about .acts b:hover, #about .acts b.on { background: var( --pick ); }
+#about .more:not( :empty ) { margin-top: 22px; }   /* 单击按钮之后, 按钮下面出现邮箱或者收款码 */
+#about .more img { display: block; width: 300px; margin: 0 auto; border-radius: 14px; }
+#about.help { display: none; width: max-content; white-space: nowrap; grid-template-columns: auto auto; gap: 8px 40px; text-align: left; padding: 30px 48px; max-height: calc( 100vh - 120px ); overflow-y: auto; }   /* 使用说明: 左列是操作, 右列是结果 */
+#about.help h4 { grid-column: 1 / 3; margin: 14px 0 0; font-size: 24px; color: var( --accent ); }
+#about.help div { margin: 0; }
+#about.help .do { color: var( --line ); }
+</style>
+</head>
+<body>
+<svg id="svg">
+  <defs><filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#6B5F52" flood-opacity=".26"/></filter></defs>
+  <g id="view"><g id="gGroups"></g><g id="gLinks"></g><g id="gNodes"></g><path id="temp"/></g>
+</svg>
+<input id="edit" spellcheck="false" autocomplete="off">
+<input id="label" spellcheck="false" autocomplete="off">
+<div id="formula"></div>
+<div id="ver"><svg viewBox="-12 -12 24 24"><circle r="8.6" stroke-width="3.4" stroke-dasharray="3.38 3.38"/><circle r="5.6" stroke-width="2.6"/></svg></div>
+<span id="note"></span>
+<div id="paint"><div></div><i></i></div>
+<div id="drag"></div>
+<div id="win"><b data-m="Min"><svg viewBox="0 0 16 16"><path d="M3 8H13"/></svg></b><b data-m="Max"><svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg></b><b data-m="Quit"><svg viewBox="0 0 16 16"><path d="M3.5 3.5L12.5 12.5M12.5 3.5L3.5 12.5"/></svg></b></div>
+<div id="menu"></div>
+<div id="about"></div>
+<script src="/Lib/mathlive/mathlive.min.js"></script>
+<script>
+// 数据
+// nodes  小圆: { id, text, x, y }                              形状由文字宽度算出, 不保存
+// 小圆 线条 大圆 都可以带 paint: 读者在调色盘里选的色相 ( 0 到 360 ); 没有 paint 就是默认的颜色
+// same   true 时文字完全相同的小圆自动涂成同一种底色; 每个项目各自记
+// links  线条: { id, a, b, style, text }                       a 是起点小圆的 id, b 是终点小圆的 id, 端点由小圆位置算出
+// groups 大圆: { id, members: [ 小圆 id ], formula, color }    只保存成员名单, 轮廓由成员位置算出; formula 是 LaTeX 文本; color 是 PALETTE 的下标
+const NS = 'http://www.w3.org/2000/svg', R = 56, PAD = 26, STYLES = ['dash', 'solid', 'arrow'];   // 线条的三种样子, 按滚轮的顺序排: 向上滚到头是 dash 虚线, 新线条是 solid 实线, 向下滚到头是 arrow 从起点指向终点的箭头
+const PALETTE = ['hsl( 40 46% 58% )', 'hsl( 112 28% 54% )', 'hsl( 184 34% 50% )', 'hsl( 256 36% 68% )', 'hsl( 328 34% 66% )'];   // 大圆轮廓的颜色: 赭黄 灰绿 青 蓝紫 藕粉, 按色环的顺序排, 相邻两个色相差 72 度
+const GAP = 14, BAND = 34, ROUND = 20;   // 大圆的轮廓绕开不是成员的小圆时: GAP 轮廓和这个小圆之间的空隙, BAND 绕到这个小圆背面的那一段轮廓带的宽度, ROUND 拐角磨圆的尺寸
+const $ = id => document.getElementById(id);
+const svg = $('svg'), view = $('view'), gGroups = $('gGroups'), gLinks = $('gLinks'), gNodes = $('gNodes'), temp = $('temp'), edit = $('edit'), formula = $('formula'), ver = $('ver'), menu = $('menu');
+
+// 页面显示在 元素面板.exe 的窗口里; 元素面板.exe 交给页面两样东西:
+// host   给 元素面板.exe 发消息: host.postMessage( 'F11' ) 切换全屏, host.postMessage( 'Quit' ) 关闭窗口
+// store  读写项目文件, 每个函数都当场做完再返回:
+//        store.List() 全部项目的名字, 一行一个, 最近保存的排在前面;  store.Load( 项目名 ) 项目的内容, 没有这个项目时是空字符串
+//        store.Save( 项目名, 内容 );  store.Rename( 旧名, 新名 ) 已经有同名的项目时返回 false;  store.Delete( 项目名 ) 项目文件搬进 Projects\_Trash
+const host = window.chrome && chrome.webview;
+let store = null;
+try { store = host.hostObjects.sync.store; store.List(); } catch (e) { store = null; }
+if (!store) { document.body.innerHTML = '<p style="margin: 60px; font: 30px Microsoft YaHei; color: #5A544D">请关掉这个窗口 再打开 元素面板.exe</p>'; throw new Error('页面不在新版 元素面板.exe 的窗口里'); }   // 旧版 元素面板.exe 的窗口刷新之后会走到这里
+const v = { x: 0, y: 0, k: 1 };   // 画布的平移和缩放
+let data = { next: 1, nodes: [], links: [], groups: [], view: v };
+let sel = null;     // 选中的对象 { type, id }; 左键画圈选中多个小圆时是 { type: 'multi', ids }
+let editId = 0;     // 正在编辑文字的小圆
+let editOld = '';   // 编辑之前的文字
+let labelId = 0;    // 正在编辑小字的线条
+let act = null;     // 进行中的鼠标动作
+let want = 0;       // 读者双击轮廓要看公式的大圆; 这个大圆不再被选中时清零
+let shown = 0;      // 公式已经装进公式文本框的大圆
+let clip = null;    // 复制或剪切的小圆和连着的线条 { cut, nodes, links }
+let mouse = { clientX: 0, clientY: 0 };   // 鼠标在窗口里的位置
+const hulls = {};   // 大圆 id -> 轮廓多边形
+
+const ctx = document.createElement('canvas').getContext('2d');
+ctx.font = '30px "Microsoft YaHei", sans-serif';
+const node = id => data.nodes.find(n => n.id === id);
+const group = id => data.groups.find(g => g.id === id);
+const rx = n => Math.max(R, ctx.measureText(n.text).width / 2 + PAD);   // 文字宽度超过圆的直径, 横向半径变大, 圆变成椭圆
+const isSel = (type, id) => sel && (sel.type === type && sel.id === id || type === 'node' && sel.type === 'multi' && sel.ids.includes(id));
+const pos = e => [(e.clientX - v.x) / v.k, (e.clientY - v.y) / v.k];
+
+// 小圆 n 的边界上, 朝向点 ( tx, ty ) 的那一点
+function edge(n, tx, ty) {
+  const dx = tx - n.x, dy = ty - n.y, t = 1 / (Math.hypot(dx / rx(n), dy / R) || 1);
+  return [n.x + dx * t, n.y + dy * t];
+}
+
+// 凸包: 包住全部点的最小凸多边形
+function hull(p) {
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+  p.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  for (const q of p) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+
+function inside(poly, x, y) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if ((poly[i][1] > y) !== (poly[j][1] > y) && x < (poly[j][0] - poly[i][0]) * (y - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0]) c = !c;
+  return c;
+}
+
+function area(poly) {
+  let s = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) s += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+  return Math.abs(s);
+}
+
+// 包住小圆 n 再向外放大 pad 的跑道形 ( 两头是半圆, 中间是直边 ) 边界上的 count 个点
+// 不用椭圆: 文字长的小圆是扁的椭圆, 椭圆两头尖, 大圆的轮廓绕过去时就有尖角; 跑道形两头是整个半圆, 轮廓是润的
+function oval(n, pad, count) {
+  const p = [];
+  for (let i = 0; i < count; i++) { const a = i * 2 * Math.PI / count; p.push([n.x + Math.sign(Math.cos(a)) * (rx(n) - R) + (R + pad) * Math.cos(a), n.y + (R + pad) * Math.sin(a)]); }
+  return p;
+}
+
+// 大圆的轮廓: 每个成员向外放大一圈, 再取凸包
+// 大圆 A 的成员全部在大圆 B 里, B 的轮廓就比 A 再大一圈, 两条轮廓不重合
+// 凸包里有不是成员的小圆时, 轮廓改由 carve 算出, 绕开这些小圆
+function outline(gr) {
+  const depth = data.groups.filter(o => o.members.length < gr.members.length && o.members.every(m => gr.members.includes(m))).length, H = hull(gr.members.flatMap(id => oval(node(id), 30 + 22 * depth, 36)));
+  const xs = H.map(p => p[0]), ys = H.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const out = data.nodes.filter(n => !gr.members.includes(n.id) && n.x + rx(n) + GAP > x0 && n.x - rx(n) - GAP < x1 && n.y + R + GAP > y0 && n.y - R - GAP < y1 && [[n.x, n.y], ...oval(n, GAP, 12)].some(p => inside(H, p[0], p[1])));
+  const loops = out.length ? carve(H, gr, out) : [H];
+  hulls[gr.id] = loops[0];
+  return loops.map(l => 'M' + l.map(p => p.join(' ')).join('L') + 'Z').join('');
+}
+
+// 凸包 H 里有不是成员的小圆 out: 从每个这样的小圆朝最近的凸包边界挖一条通道, 小圆连同通道从凸包里去掉, 轮廓就从小圆的背面绕过去
+// 做法: 写出一个函数 F, 轮廓里面 F 为正, 外面 F 为负, 再由 contour 连出 F 由负变正的边界
+// 返回若干条闭合折线, 面积最大的排在最前面
+function carve(H, gr, out) {
+  const cx = H.reduce((s, p) => s + p[0], 0) / H.length, cy = H.reduce((s, p) => s + p[1], 0) / H.length, E = [], ch = [];
+  H.forEach((p, i) => {   // E: 凸包的每条边 [ 朝里的法线 x, 朝里的法线 y, 边的位置 ]
+    const q = H[(i + 1) % H.length], l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (l < 1e-6) return;
+    let nx = (q[1] - p[1]) / l, ny = (p[0] - q[0]) / l;
+    if (nx * (cx - p[0]) + ny * (cy - p[1]) < 0) { nx = -nx; ny = -ny; }
+    E.push([nx, ny, nx * p[0] + ny * p[1]]);
+  });
+  const deep = (x, y) => { let d = 1e9; for (const e of E) d = Math.min(d, e[0] * x + e[1] * y - e[2]); return d; };   // 点到凸包边界的距离, 凸包里面为正
+  // 通道 c: 小圆 c.n 放大 GAP 之后, 沿方向 ( c.ux, c.uy ) 扫过长度 c.len 留下的区域; reach 小于 1 的点在通道里
+  const reach = (x, y, c) => {
+    const px = (x - c.n.x) / c.a, py = (y - c.n.y) / c.b, sx = c.ux * c.len / c.a, sy = c.uy * c.len / c.b, t = Math.max(0, Math.min(1, (px * sx + py * sy) / (sx * sx + sy * sy || 1)));
+    return Math.hypot(px - t * sx, py - t * sy);
+  };
+
+  for (const n of out) {
+    const a = rx(n) + GAP, b = R + GAP, d0 = deep(n.x, n.y), dirs = [];   // dirs: 通道的候选方向 [ 方向 x, 方向 y, 沿这个方向走出凸包的距离 ]
+    if (d0 <= 0) { const l = Math.hypot(n.x - cx, n.y - cy) || 1; dirs.push([(n.x - cx) / l, (n.y - cy) / l, -a - b]); }   // 圆心已经在凸包外面: 通道长度为 0
+    else {
+      for (let i = 0; i < 24; i++) {
+        const ux = Math.cos(i * Math.PI / 12), uy = Math.sin(i * Math.PI / 12);
+        let t = 1e9;
+        for (const e of E) { const s = e[0] * ux + e[1] * uy; if (s < -1e-6) t = Math.min(t, (e[0] * n.x + e[1] * n.y - e[2]) / -s); }
+        dirs.push([ux, uy, t]);
+      }
+      dirs.sort((p, q) => p[2] - q[2]);
+      const e = E.find(e => Math.abs(e[0] * n.x + e[1] * n.y - e[2] - d0) < 1e-9);
+      dirs.unshift([-e[0], -e[1], d0]);   // 排在最前面的候选: 正对最近的那条边
+    }
+    for (const [ux, uy, t] of dirs) {    // 选第一个不碰到任何成员的方向; 每个方向都碰到成员时, 这个小圆留在轮廓里面
+      const far = 1 / Math.hypot(ux / a, uy / b), c = { n, a, b, ux, uy, len: t + a + b, ring: d0 > 0 && deep(n.x - ux * far, n.y - uy * far) < BAND };   // ring: 小圆的背面已经顶到凸包的另一侧, 通道会把凸包切成两半
+      if (gr.members.some(id => [[node(id).x, node(id).y], ...oval(node(id), 10, 12)].some(p => reach(p[0], p[1], c) < 1))) continue;
+      ch.push(c);
+      break;
+    }
+  }
+  if (!ch.length) return [H];
+
+  const smin = (p, q) => { const h = Math.max(ROUND - Math.abs(p - q), 0) / ROUND; return Math.min(p, q) - h * h * ROUND / 4; };   // 取两个数里小的那个, 两个数接近时再减一点: 轮廓在通道口的拐角变圆
+  const F = (x, y) => {
+    let f = deep(x, y);
+    for (const c of ch) if (c.ring) {   // 小圆背着通道的那半圈, 加一条宽 BAND 的带子: 通道把凸包切成两半时, 两半由这条带子连着
+      const dx = x - c.n.x, dy = y - c.n.y, e = Math.hypot(dx, dy) * (1 - 1 / (Math.hypot(dx / c.a, dy / c.b) || 1e-9));   // e: 从放大后的小圆边界沿半径向外量的距离
+      f = Math.max(f, Math.min(e, BAND - e, -dx * c.ux - dy * c.uy));
+    }
+    for (const c of ch) f = smin(f, (reach(x, y, c) - 1) * c.b);
+    return f;
+  };
+  const xs = H.map(p => p[0]).concat(ch.flatMap(c => [c.n.x - c.a - BAND, c.n.x + c.a + BAND])), ys = H.map(p => p[1]).concat(ch.flatMap(c => [c.n.y - c.b - BAND, c.n.y + c.b + BAND]));
+  const loops = contour(F, Math.min(...xs) - 16, Math.min(...ys) - 16, Math.max(...xs) + 16, Math.max(...ys) + 16, 8).filter(l => area(l) > 5000).sort((p, q) => area(q) - area(p));
+  return loops.length ? loops : [H];
+}
+
+// 在边长 step 的方格网上算出 f 的值, 连出 f 由负变正的边界, 返回若干条闭合折线
+function contour(f, x0, y0, x1, y1, step) {
+  const nx = Math.ceil((x1 - x0) / step) + 1, ny = Math.ceil((y1 - y0) / step) + 1, val = new Float64Array(nx * ny), link = new Map(), pt = new Map(), loops = [], seen = new Set();
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) val[j * nx + i] = f(x0 + i * step, y0 + j * step);
+  // 方格 ( i, j ) 的 4 条边: 0 上 1 右 2 下 3 左; cross 返回边的编号, 同时算出边界穿过这条边的那一点
+  const cross = (i, j, s) => {
+    const [ai, aj, bi, bj] = [[i, j, i + 1, j], [i + 1, j, i + 1, j + 1], [i, j + 1, i + 1, j + 1], [i, j, i, j + 1]][s], id = (aj * nx + ai) * 2 + (s & 1);
+    if (!pt.has(id)) { const a = val[aj * nx + ai], b = val[bj * nx + bi], t = a / (a - b); pt.set(id, [x0 + (ai + (bi - ai) * t) * step, y0 + (aj + (bj - aj) * t) * step]); link.set(id, []); }
+    return id;
+  };
+  // SEG: 方格 4 个角的正负共 16 种情况, 每种情况下边界连接哪两条边
+  const SEG = [[], [3, 0], [0, 1], [3, 1], [1, 2], [3, 0, 1, 2], [0, 2], [3, 2], [2, 3], [0, 2], [0, 1, 2, 3], [1, 2], [3, 1], [0, 1], [3, 0], []];
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    const s = SEG[(val[j * nx + i] > 0) + (val[j * nx + i + 1] > 0) * 2 + (val[(j + 1) * nx + i + 1] > 0) * 4 + (val[(j + 1) * nx + i] > 0) * 8];
+    for (let k = 0; k < s.length; k += 2) { const p = cross(i, j, s[k]), q = cross(i, j, s[k + 1]); link.get(p).push(q); link.get(q).push(p); }
+  }
+  for (const start of link.keys()) {   // 从一条边出发, 顺着连接一直走, 走回出发的边就是一条闭合折线
+    const loop = [];
+    for (let prev = -1, cur = start; cur !== undefined && !seen.has(cur);) { seen.add(cur); loop.push(pt.get(cur)); const nb = link.get(cur), nxt = nb[0] !== prev ? nb[0] : nb[1]; prev = cur; cur = nxt; }
+    if (loop.length > 2) loops.push(loop);
+  }
+  return loops;
+}
+
+function el(tag, cls, parent) {
+  const e = document.createElementNS(NS, tag);
+  if (cls) e.setAttribute('class', cls);
+  parent.appendChild(e);
+  return e;
+}
+
+// 让 layer 里的 SVG 元素和 items 一一对应: 缺的新建, 多的删除, 已有的保留
+function sync(layer, type, items, make) {
+  const have = {};
+  for (const g of [...layer.children]) { if (items.some(it => it.id === +g.dataset.id)) have[g.dataset.id] = g; else g.remove(); }
+  for (const it of items) if (!have[it.id]) { const g = el('g', type, layer); g.dataset.type = type; g.dataset.id = it.id; make(g); have[it.id] = g; }
+  return have;
+}
+
+const pale = hue => `hsl( ${hue} 45% 85% )`;   // 小圆的底色用浅的
+const deep = hue => `hsl( ${hue} 40% 58% )`;   // 线条和大圆的轮廓用深的
+
+function draw() {
+  view.setAttribute('transform', `translate( ${v.x} ${v.y} ) scale( ${v.k} )`);
+
+  prune();
+  spread();
+  const gs = sync(gGroups, 'group', data.groups, g => { el('path', 'area', g); el('path', 'hit', g); });
+  for (const gr of data.groups) {
+    const g = gs[gr.id], d = outline(gr);
+    g.children[0].setAttribute('d', d);
+    g.children[0].style.stroke = isSel('group', gr.id) ? '' : gr.paint != null ? deep(gr.paint) : PALETTE[gr.color];
+    g.children[1].setAttribute('d', d);
+    g.classList.toggle('sel', !!isSel('group', gr.id));
+  }
+
+  const ls = sync(gLinks, 'link', data.links, g => { el('path', 'line', g); el('path', 'head', g); el('path', 'hit', g); el('text', '', g); });
+  for (const l of data.links) {
+    const g = ls[l.id], a = node(l.a), b = node(l.b);
+    let [x1, y1] = edge(a, b.x, b.y), [x2, y2] = edge(b, a.x, a.y), head = '';
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len, deg = Math.atan2(uy, ux) * 180 / Math.PI;
+    g.children[3].setAttribute('transform', `translate( ${(x1 + x2) / 2} ${(y1 + y2) / 2} ) rotate( ${Math.abs(deg) > 90 ? deg + 180 : deg} ) translate( 0 -16 )`);   // 小字在线条中点的上方, 顺着线条的方向, 字头不朝下
+    g.children[3].textContent = l.id === labelId ? '' : l.text || '';
+    g.children[2].setAttribute('d', `M${x1} ${y1}L${x2} ${y2}`);
+    if (l.style === 'arrow') { x2 -= ux * 3; y2 -= uy * 3; const tx = x2, ty = y2; x2 -= ux * 18; y2 -= uy * 18; head = `M${tx} ${ty}L${x2 - uy * 8} ${y2 + ux * 8}L${x2 + uy * 8} ${y2 - ux * 8}Z`; }
+    g.children[0].setAttribute('d', `M${x1} ${y1}L${x2} ${y2}`);
+    g.children[0].style.strokeDasharray = l.style === 'dash' ? '2 10' : '';
+    g.children[1].setAttribute('d', head);
+    g.classList.toggle('sel', !!isSel('link', l.id));
+    g.children[0].style.stroke = g.children[1].style.stroke = g.children[1].style.fill = g.children[3].style.fill = l.paint != null && !isSel('link', l.id) ? deep(l.paint) : '';
+  }
+
+  const ns = sync(gNodes, 'node', data.nodes, g => { el('ellipse', '', g).setAttribute('ry', R); el('text', '', g); });
+  // 文字完全相同的小圆用同一种底色: same 是出现两次以上的文字, 每种文字按 137.5 度的间隔取一个色相; 数一遍文字就够, 不用两两比对
+  const seen = {};
+  for (const n of data.nodes) if (n.text) seen[n.text] = (seen[n.text] || 0) + 1;
+  const same = data.same ? Object.keys(seen).filter(k => seen[k] > 1) : [];
+  for (const n of data.nodes) {
+    const g = ns[n.id];
+    const lead = same.includes(n.text) && data.nodes.find(o => o.text === n.text && o.paint != null);   // 同字同色打开时, 这几个文字相同的小圆里第一个被读者涂过颜色的
+    g.children[0].style.fill = lead ? pale(lead.paint) : n.paint != null ? pale(n.paint) : same.includes(n.text) ? pale(same.indexOf(n.text) * 137.5 % 360) : '';   // 两层颜色: 读者涂的优先, 没涂过才用自动配的; 同字的小圆跟着读者涂的那一个
+    g.setAttribute('transform', `translate( ${n.x} ${n.y} )`);
+    g.children[0].setAttribute('rx', rx(n));
+    g.children[1].textContent = n.id === editId ? '' : n.text;
+    g.classList.toggle('sel', !!isSel('node', n.id));
+  }
+
+  if (editId) placeEdit();
+  placeFormula();
+}
+
+// 撤销用的历史: last 是当前的内容, past 是之前每一步的内容, future 是撤销掉的内容
+// 内容 = 小圆 线条 大圆; 画布的平移和缩放不算内容, 不进历史
+const snap = () => JSON.stringify([data.next, data.nodes, data.links, data.groups]);
+let last = snap(), past = [], future = [], lastKey;
+
+// 每次改动之后调用: 内容变了就记一步历史, 再当场写进项目文件
+// key: 连续几次改动带同一个 key 时只记一步; 公式文本框里每打一个字调用一次, 整段输入只算一步
+let proj = '';   // 当前项目的名字
+const write = () => store.Save(proj, JSON.stringify(data, null, 1));
+function save(key) {
+  const now = snap();
+  if (now !== last) { if (!key || key !== lastKey) past.push(last); if (past.length > 300) past.shift(); future = []; last = now; }
+  lastKey = key;
+  write();
+}
+
+function undo() { if (past.length) { future.push(last); restore(past.pop()); } }
+function redo() { if (future.length) { past.push(last); restore(future.pop()); } }
+function restore(s) {
+  last = s; lastKey = undefined;
+  [data.next, data.nodes, data.links, data.groups] = JSON.parse(s);
+  sel = null;
+  if (clip) clip.cut = false;   // 剪切走的小圆可能已经被撤销放回画布, 之后的粘贴一律按复制处理
+  draw(); write();
+}
+
+// 编辑小圆的文字: 一个没有边框和底色的输入框盖在小圆上, 屏幕上只多出光标和选中文字的底色
+function placeEdit() {
+  const n = node(editId), w = rx(n) * 2 * v.k, h = 48 * v.k;
+  edit.style.left = v.x + n.x * v.k - w / 2 + 'px';
+  edit.style.top = v.y + n.y * v.k - h / 2 + 'px';
+  edit.style.width = w + 'px';
+  edit.style.height = edit.style.lineHeight = h + 'px';
+  edit.style.fontSize = 30 * v.k + 'px';
+}
+
+function startEdit(id) {
+  commitEdit();
+  editId = id; editOld = edit.value = node(id).text; sel = { type: 'node', id };
+  edit.style.display = 'block';
+  draw();
+  edit.focus();
+  edit.select();   // 全选: 直接打字就替换, 按一次删除键就清空
+}
+
+function commitEdit() {
+  if (!editId) return;
+  const n = node(editId);
+  n.text = edit.value.trim();
+  editId = 0;
+  edit.style.display = 'none';
+  if (n.text === '') { sel = { type: 'node', id: n.id }; return removeSel(); }   // 没有有效字符 ( 空格不算 ) 的小圆不包含信息: 结束编辑时删除
+  draw(); save();
+}
+
+edit.addEventListener('input', () => { if (editId) { node(editId).text = edit.value; draw(); } });
+edit.addEventListener('blur', commitEdit);
+
+// 线条上的小字: 双击线条, 一个没有边框的输入框出现在线条中点; Enter 或者单击别处确定, Esc 放弃
+const label = $('label');
+function startLabel(id) {
+  const l = data.links.find(l => l.id === id), a = node(l.a), b = node(l.b), p = edge(a, b.x, b.y), q = edge(b, a.x, a.y);
+  labelId = id; sel = { type: 'link', id }; label.value = l.text || '';
+  Object.assign(label.style, { display: 'block', width: '400px', left: v.x + (p[0] + q[0]) / 2 * v.k - 200 + 'px', top: v.y + (p[1] + q[1]) / 2 * v.k - 30 * v.k + 'px', height: 28 * v.k + 'px', fontSize: 19 * v.k + 'px' });
+  draw();
+  label.focus(); label.select();
+}
+function commitLabel(keep) {
+  const l = data.links.find(l => l.id === labelId);
+  if (!labelId) return;
+  labelId = 0; label.style.display = 'none';
+  if (l && keep) l.text = label.value.trim();
+  draw(); save();
+}
+label.addEventListener('blur', () => commitLabel(true));
+label.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) commitLabel(true); if (e.key === 'Escape') commitLabel(false); });
+edit.addEventListener('keydown', e => {
+  if (e.isComposing) return;   // 输入法选字时的 Enter 不结束编辑
+  if (e.key === 'Delete') { e.preventDefault(); editId = 0; edit.style.display = 'none'; return removeSel(); }   // 编辑状态按 Delete: 删除整个小圆; 删除文字用 Backspace
+  if (e.key === 'Escape') edit.value = editOld;
+  if (e.key === 'Enter' || e.key === 'Escape') commitEdit();
+});
+
+// 公式文本框: 双击大圆的轮廓时出现在大圆下方, 用 MathLive 的 math-field 显示和编辑大圆的 formula
+// 光标在公式文本框里的时候, 窗口底部出现符号键盘; 选中别的对象或者单击空白处, 公式文本框消失
+let mf = null;
+if (window.MathfieldElement) {
+  MathfieldElement.soundsDirectory = null;
+  mf = new MathfieldElement();
+  mf.mathVirtualKeyboardPolicy = 'manual';
+  formula.appendChild(mf);
+  mathVirtualKeyboard.layouts = [{
+    label: '微积分',
+    rows: [
+      ['\\frac{#@}{#?}', '#@^{#?}', '#@_{#?}', '\\sqrt{#0}', '\\int', '\\int_{#?}^{#?}', '\\frac{\\mathrm{d}#?}{\\mathrm{d}t}', '\\frac{\\partial #?}{\\partial #?}', '\\sum_{#?}^{#?}', '\\lim_{#?\\to #?}'],
+      ['\\mathrm{d}', '\\partial', '\\Delta', '\\nabla', '\\infty', '\\times', '\\div', '\\cdot', '\\pm', '\\approx'],
+      ['=', '\\ne', '\\le', '\\ge', '\\to', '\\propto', '(', ')', '\\pi', '\\theta'],
+      ['\\omega', '\\psi', '\\varphi', '\\alpha', '\\beta', '\\lambda', '\\mu', '\\rho', '\\Omega', '[backspace]'],
+    ],
+  }, 'numeric', 'symbols', 'alphabetic', 'greek'];
+  mf.addEventListener('focusin', () => mathVirtualKeyboard.show());
+  mf.addEventListener('focusout', () => mathVirtualKeyboard.hide());
+  mf.addEventListener('input', () => { const g = group(shown); if (g) { g.formula = mf.value; placeFormula(); save('formula' + g.id); } });
+  mathVirtualKeyboard.addEventListener('geometrychange', placeFormula);
+}
+
+function placeFormula() {
+  if (!isSel('group', want)) want = 0;
+  const g = mf && group(want);
+  if (!g) { if (mf && formula.style.display === 'block') { mf.blur(); formula.style.display = 'none'; } return; }   // shown 不清零: 公式文本框消失之后才到达的 input 事件仍然写进原来的大圆
+  if (shown !== g.id || formula.style.display !== 'block') { shown = g.id; mf.setValue(g.formula, { silenceNotifications: true }); formula.style.display = 'block'; }
+  const xs = hulls[g.id].map(p => p[0]), ys = hulls[g.id].map(p => p[1]);
+  place(formula, (Math.min(...xs) + Math.max(...xs)) / 2, Math.max(...ys), mathVirtualKeyboard.visible ? mathVirtualKeyboard.boundingRect.top : innerHeight);
+}
+
+// 把浮动的方框 box 放在画布坐标 ( cx, bottom ) 的正下方; 放不下时停在屏幕坐标 floor 的上方
+function place(box, cx, bottom, floor) {
+  box.style.left = Math.max(8, Math.min(innerWidth - box.offsetWidth - 8, v.x + cx * v.k - box.offsetWidth / 2)) + 'px';
+  box.style.top = Math.min(floor - box.offsetHeight - 8, v.y + bottom * v.k + 14) + 'px';
+}
+
+// 套大圆: 左键画圈选中的几个小圆组成一个大圆, 大圆被选中; 已经有成员相同的大圆就选中这个大圆
+function wrap() {
+  const ids = sel.ids;
+  sel = { type: 'group', id: (data.groups.find(g => g.members.length === ids.length && ids.every(id => g.members.includes(id))) || addGroup(ids)).id };
+  draw(); save();
+}
+
+// 鼠标指着的对象
+function hit(e) {
+  const t = document.elementFromPoint(e.clientX, e.clientY), g = t && t.closest('[data-id]');
+  return g ? { type: g.dataset.type, id: +g.dataset.id } : null;
+}
+
+// 大圆至少有两个成员: 成员只剩一个的大圆自动删除; 每次画之前检查, 删除 剪切 退出大圆 都不用各自处理
+function prune() {
+  for (const g of [...data.groups]) if (g.members.length < 2) dropGroup(g);
+  if (sel && sel.type === 'group' && !group(sel.id)) sel = null;
+}
+
+// 有共同成员的两个大圆轮廓交叉, 颜色要分得开: 两个大圆的颜色在 PALETTE 里至少隔两格 ( 色相差 144 度 )
+// 隔得不够时, 给排在后面的大圆换成离前面几个大圆最远的颜色
+function spread() {
+  const gap = (a, b) => Math.min(Math.abs(a - b), PALETTE.length - Math.abs(a - b));
+  data.groups.forEach((g, i) => {
+    const near = data.groups.slice(0, i).filter(o => o.members.some(m => g.members.includes(m))).map(o => o.color), far = c => Math.min(...near.map(n => gap(c, n)));
+    if (near.length && far(g.color) < 2) g.color = PALETTE.map((p, c) => c).sort((a, b) => far(b) - far(a))[0];
+  });
+}
+
+function addGroup(members) {
+  const color = PALETTE.map((c, i) => i).sort((a, b) => data.groups.filter(g => g.color === a).length - data.groups.filter(g => g.color === b).length)[0];   // 用得最少的颜色
+  const g = { id: data.next++, members, formula: '', color };
+  data.groups.push(g);
+  return g;
+}
+
+function dropGroup(g) { data.groups.splice(data.groups.indexOf(g), 1); delete hulls[g.id]; }
+
+svg.addEventListener('mousedown', e => {
+  commitEdit();
+  if (mf) mf.blur();
+  const h = hit(e), [x, y] = pos(e);
+  if (e.button === 2) act = h && h.type === 'node' ? { kind: 'link', from: h.id, sx: e.clientX, sy: e.clientY } : { kind: 'pan', x: e.clientX - v.x, y: e.clientY - v.y, sx: e.clientX, sy: e.clientY };   // 右键在小圆上: 拉出连线; 右键在别处: 拖动画布
+  if (e.button !== 0) return;
+  const many = h && h.type === 'node' && sel && sel.type === 'multi' && sel.ids.includes(h.id);                 // 按住的小圆是画圈选中的其中一个
+  if (!many) sel = h;
+  if (!h) act = { kind: 'lasso', pts: [[x, y]] };                                                               // 左键在空白处: 画圈, 选中圈里的小圆
+  else if (h.type === 'node') act = { kind: 'move', ids: many ? sel.ids : [h.id], x, y };                       // 左键在小圆上: 选中并拖动小圆; 画圈选中的小圆一起移动
+  else if (h.type === 'group') act = { kind: 'move', ids: group(h.id).members, x, y };                          // 左键在大圆轮廓上: 选中大圆并拖动全部成员
+  draw();
+});
+
+window.addEventListener('mousemove', e => {
+  mouse = e;
+  if (!act) return;
+  const [x, y] = pos(e);
+  if (act.kind === 'pan') { v.x = e.clientX - act.x; v.y = e.clientY - act.y; draw(); }
+  if (act.kind === 'move') { for (const id of act.ids) { node(id).x += x - act.x; node(id).y += y - act.y; } act.x = x; act.y = y; draw(); }
+  if (act.kind === 'link') temp.setAttribute('d', 'M' + edge(node(act.from), x, y).join(' ') + `L${x} ${y}`);
+  if (act.kind === 'lasso') { act.pts.push([x, y]); temp.setAttribute('d', 'M' + act.pts.map(p => p.join(' ')).join('L')); }
+});
+
+window.addEventListener('mouseup', e => {
+  const a = act, h = hit(e), [x, y] = pos(e);
+  if (!a) return;
+  act = null;
+  if (e.button === 2 && h && isSel(h.type, h.id) && Math.hypot(e.clientX - a.sx, e.clientY - a.sy) < 5) showPaint(e);   // 右键在选中的对象上单击 ( 没有拖动 ): 弹出调色盘
+  temp.setAttribute('d', '');
+
+  if (a.kind === 'link' && h && h.type === 'node' && h.id !== a.from) {   // 右键松开在另一个小圆上: 连线
+    let l = data.links.find(l => (l.a === a.from && l.b === h.id) || (l.a === h.id && l.b === a.from));
+    const join = l && data.groups.filter(g => g.members.includes(h.id) && !g.members.includes(a.from)).sort((p, q) => area(hulls[p.id]) - area(hulls[q.id]))[0];
+    if (join) { join.members.push(a.from); sel = { type: 'group', id: join.id }; }   // 两个小圆已经连着线, 又拖了一次: 读者是要把这个小圆拉进对方所在的大圆
+    else {
+      if (!l) data.links.push(l = { id: data.next++, a: a.from, b: h.id, style: 'solid' });
+      sel = { type: 'link', id: l.id };
+    }
+  }
+  else if (a.kind === 'link' && !(h && h.type === 'node')) {              // 右键从小圆拖出, 松开在空白处
+    const here = data.groups.filter(g => inside(hulls[g.id], x, y) || h && h.id === g.id).sort((p, q) => area(hulls[p.id]) - area(hulls[q.id]));   // 松开的位置在哪些大圆里面, 小的排在前面
+    const join = here.find(g => !g.members.includes(a.from));
+    if (join) { join.members.push(a.from); sel = { type: 'group', id: join.id }; }   // 松开在一个还不是成员的大圆里面: 加入这个大圆
+    else for (const g of data.groups) if (g.members.includes(a.from) && !here.includes(g)) { g.members.splice(g.members.indexOf(a.from), 1); sel = { type: 'group', id: g.id }; }   // 否则: 松开的位置在哪个大圆的外面, 就退出哪个大圆
+  }
+
+  if (a.kind === 'lasso') {
+    const xs = a.pts.map(p => p[0]), ys = a.pts.map(p => p[1]), size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) * v.k;
+    const ids = size < 8 ? [] : data.nodes.filter(n => inside(a.pts, n.x, n.y)).map(n => n.id);
+    sel = ids.length > 1 ? { type: 'multi', ids } : ids.length ? { type: 'node', id: ids[0] } : null;   // 左键画完一个圈: 选中圈里的小圆
+  }
+
+  draw(); save();
+});
+
+svg.addEventListener('dblclick', e => {
+  const h = hit(e), [x, y] = pos(e);
+  if (h && h.type === 'node') return startEdit(h.id);   // 双击小圆: 编辑文字
+  if (h && h.type === 'link') return startLabel(h.id);  // 双击线条: 编辑线条上的小字
+  if (h && h.type === 'group' && mf) { sel = h; want = h.id; draw(); mf.focus(); }   // 双击大圆的轮廓: 弹出公式文本框, 光标在公式文本框里
+  if (h) return;
+  const n = { id: data.next++, text: '', x, y };        // 双击空白处: 新建小圆
+  data.nodes.push(n);
+  for (const g of data.groups) if (inside(hulls[g.id], x, y)) g.members.push(n.id);   // 新建在大圆里面的小圆直接是成员
+  startEdit(n.id);
+});
+
+window.addEventListener('wheel', e => {
+  if (e.target.closest && !e.target.closest('#svg')) return;   // 鼠标在公式文本框或符号键盘上: 不处理
+  e.preventDefault();
+  if (sel && sel.type === 'link') {   // 选中线条时: 滚轮在 STYLES 里前后移动一格, 到头就停住, 不循环
+    const l = data.links.find(l => l.id === sel.id);
+    l.style = STYLES[Math.max(0, Math.min(2, STYLES.indexOf(l.style) + (e.deltaY > 0 ? 1 : -1)))];
+  } else {                            // 其余时候: 滚轮以鼠标为中心缩放画布
+    const k = Math.min(4, Math.max(.2, v.k * (e.deltaY > 0 ? 1 / 1.1 : 1.1)));
+    v.x = e.clientX - (e.clientX - v.x) * k / v.k;
+    v.y = e.clientY - (e.clientY - v.y) * k / v.k;
+    v.k = k;
+  }
+  draw(); save();
+}, { passive: false });
+
+window.addEventListener('keydown', e => {
+  if (editId || document.activeElement === mf || document.activeElement.tagName === 'INPUT') return;   // 正在编辑文字 公式 或者菜单里的项目名: 按键交给输入框
+  const many = sel && (sel.type === 'node' || sel.type === 'multi'), k = e.key.toLowerCase();
+  if (k === ' ' && !e.repeat) {   // 空格: 正在拖动或者选中了几个小圆 ( 画圈选中, 或者选中大圆 ) 时, 这几个小圆整体转 90 度; 其余时候画布回到全部小圆的中心
+    e.preventDefault();
+    const ids = act && act.kind === 'move' ? act.ids : sel && sel.type === 'multi' ? sel.ids : sel && sel.type === 'group' ? group(sel.id).members : [];
+    return ids.length > 1 ? turn(ids) : home();
+  }
+  if (k === 'delete' && sel) removeSel();
+  if (k === 'enter' && sel && sel.type === 'multi') wrap();
+  if (e.ctrlKey && k === 'c' && many) copy(false);
+  if (e.ctrlKey && k === 'x' && many) copy(true);
+  if (e.ctrlKey && k === 'v' && clip) paste();
+  if (e.ctrlKey && (k === 'z' || k === 'y')) e.preventDefault();                   // 不让浏览器自带的撤销去改已经隐藏的文字输入框
+  if (e.ctrlKey && k === 'z' && !e.shiftKey && !act) undo();                      // Ctrl+Z: 撤销一步
+  if (e.ctrlKey && (k === 'y' || (k === 'z' && e.shiftKey)) && !act) redo();      // Ctrl+Y 或 Ctrl+Shift+Z: 恢复刚撤销的一步
+});
+
+// 调色盘: 一排常用的颜色 ( 第一个是恢复默认 ), 下面一条色带; 选中的颜色涂到选中的对象上
+const paint = $('paint'), HUES = [5, 28, 48, 112, 184, 215, 256, 328];
+for (const hue of [null, ...HUES]) { const b = paint.firstChild.appendChild(document.createElement('b')); if (hue !== null) b.style.background = `hsl( ${hue} 45% 70% )`; b.addEventListener('click', () => setPaint(hue)); }
+paint.lastChild.addEventListener('click', e => setPaint(Math.round(e.offsetX / paint.lastChild.offsetWidth * 360) % 360));
+function showPaint(e) {
+  paint.style.display = 'block';
+  paint.style.left = Math.min(e.clientX + 12, innerWidth - paint.offsetWidth - 8) + 'px';
+  paint.style.top = Math.min(e.clientY + 12, innerHeight - paint.offsetHeight - 8) + 'px';
+}
+function setPaint(hue) {
+  const items = sel.type === 'multi' ? sel.ids.map(node) : [sel.type === 'node' ? node(sel.id) : sel.type === 'group' ? group(sel.id) : data.links.find(l => l.id === sel.id)];
+  for (const it of items) if (hue === null) delete it.paint; else it.paint = hue;
+  paint.style.display = '';
+  sel = null;   // 取消选中, 新颜色马上看得见
+  draw(); save();
+}
+
+// 几个小圆占的方框的中心
+function middle(ns) {
+  const xs = ns.map(n => n.x), ys = ns.map(n => n.y);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+}
+
+// 小圆 ids 绕它们的中心顺时针转 90 度; 线条和大圆的轮廓由小圆的位置算出, 跟着转
+function turn(ids) {
+  const ns = ids.map(node), [cx, cy] = middle(ns);
+  for (const n of ns) [n.x, n.y] = [cx - (n.y - cy), cy + (n.x - cx)];
+  draw();
+  if (!act) save();   // 拖动途中转的, 松开鼠标时一起保存
+}
+
+// 画布平移到全部小圆的中心, 缩放不变
+function home() {
+  const [cx, cy] = data.nodes.length ? middle(data.nodes) : [0, 0];
+  v.x = innerWidth / 2 - cx * v.k; v.y = innerHeight / 2 - cy * v.k;
+  draw(); save();
+}
+
+// 复制: 选中的小圆 连着的线条 成员全部被选中的大圆, 抄一份存进 clip; 剪切: 存进 clip 之后再从画布上删除
+function copy(cut) {
+  const ids = sel.type === 'node' ? [sel.id] : sel.ids;
+  clip = { cut, nodes: data.nodes.filter(n => ids.includes(n.id)).map(n => ({ ...n })), links: data.links.filter(l => ids.includes(l.a) || ids.includes(l.b)).map(l => ({ ...l })), groups: data.groups.filter(g => g.members.every(m => ids.includes(m))).map(g => ({ ...g, members: [...g.members] })) };
+  if (cut) removeSel();
+}
+
+// 粘贴: clip 里的小圆出现在鼠标位置, clip 里的大圆带着公式套在粘贴出来的小圆上
+// 剪切之后的第一次粘贴, 小圆 线条 大圆用回原来的 id; 其余的粘贴都是新小圆, 新小圆用同样的线条连着原来的小圆连着的那些小圆
+// 粘贴位置在哪些大圆的轮廓里面, 小圆就加入哪些大圆
+function paste() {
+  const [mx, my] = pos(mouse), cx = clip.nodes.reduce((s, n) => s + n.x, 0) / clip.nodes.length, cy = clip.nodes.reduce((s, n) => s + n.y, 0) / clip.nodes.length, id = {};   // id: clip 里的小圆 id -> 粘贴出来的小圆 id
+  for (const n of clip.nodes) {
+    const m = { ...n, id: id[n.id] = clip.cut ? n.id : data.next++, x: n.x + mx - cx, y: n.y + my - cy };
+    data.nodes.push(m);
+    for (const g of data.groups) if (inside(hulls[g.id], m.x, m.y)) g.members.push(m.id);
+  }
+  for (const l of clip.links) {
+    const a = id[l.a] || l.a, b = id[l.b] || l.b;
+    if (node(a) && node(b) && !data.links.some(k => (k.a === a && k.b === b) || (k.a === b && k.b === a))) data.links.push({ ...l, id: clip.cut ? l.id : data.next++, a, b });
+  }
+  for (const g of clip.groups) data.groups.push({ ...g, id: clip.cut ? g.id : data.next++, members: g.members.map(m => id[m]) });
+  const ids = clip.nodes.map(n => id[n.id]);
+  sel = ids.length > 1 ? { type: 'multi', ids } : { type: 'node', id: ids[0] };
+  clip.cut = false;
+  draw(); save();
+}
+
+// 删除选中的对象
+function removeSel() {
+  if (sel.type === 'link') data.links = data.links.filter(l => l.id !== sel.id);
+  if (sel.type === 'group') dropGroup(group(sel.id));
+  const gone = sel.type === 'node' ? [sel.id] : sel.type === 'multi' ? sel.ids : [];   // 删除小圆: 连着的线条一起删除, 成员名单里除名
+  data.nodes = data.nodes.filter(n => !gone.includes(n.id));
+  data.links = data.links.filter(l => !gone.includes(l.a) && !gone.includes(l.b));
+  for (const g of data.groups) g.members = g.members.filter(m => !gone.includes(m));
+  sel = null;
+  draw(); save();
+}
+
+// 这三个按键在编辑文字或公式时也要有效, 所以单独监听
+// F11: 转告 元素面板.exe, 由 元素面板.exe 在全屏和普通窗口之间切换
+// Ctrl+S: 每次改动已经当场保存, 这里再保存一次, 并在左上角显示 已保存
+window.addEventListener('keydown', e => {
+  if (e.key === 'F11') { e.preventDefault(); host.postMessage('F11'); }
+  if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); saveNow(); }
+  if (e.key === 'Escape') closeMenu();
+});
+window.addEventListener('contextmenu', e => e.preventDefault());
+// 窗口变大变小 ( 例如按 F11 ) 时, 原来在窗口正中的那一点仍然在窗口正中
+let size = [innerWidth, innerHeight];
+window.addEventListener('resize', () => { v.x += (innerWidth - size[0]) / 2; v.y += (innerHeight - size[1]) / 2; size = [innerWidth, innerHeight]; draw(); });
+
+let noteTimer = 0;
+function saveNow() {
+  commitEdit(); write();
+  $('note').textContent = '已保存';
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => $('note').textContent = '', 1500);
+}
+
+const names = () => store.List().split('\n').filter(n => n);   // 全部项目的名字, 最近保存的排在前面
+// opened: 项目名 -> 最后一次打开的时刻, 项目列表按这个排序
+const opened = JSON.parse(localStorage.opened || '{}');
+function setProj(name) { proj = name; localStorage.project = name; opened[name] = Date.now(); localStorage.opened = JSON.stringify(opened); document.title = name + ' - 元素面板'; }
+
+// 打开项目 name: 画布和撤销历史换成 name 的
+function openProject(name, keep) {   // keep: 是从项目列表里点的, 菜单不消失
+  if (!keep) closeMenu();
+  commitEdit();
+  setProj(name);
+  const d = JSON.parse(store.Load(name) || '{}');
+  data = { next: d.next || 1, nodes: d.nodes || [], links: d.links || [], groups: d.groups || [], same: !!d.same, view: Object.assign(v, { x: 0, y: 0, k: 1 }, d.view) };
+  sel = null; shown = 0; last = snap(); past = []; future = []; lastKey = undefined;
+  if (clip) { const ids = clip.nodes.map(n => n.id); clip.cut = false; clip.links = clip.links.filter(l => ids.includes(l.a) && ids.includes(l.b)); }   // 复制的小圆可以粘贴进别的项目: 连着原项目其余小圆的线条不带过去
+  draw();
+  if (keep) drawMenu();
+}
+
+// 菜单: 单击左上角的齿轮弹出
+let ask = '';       // 菜单里正在等读者输入项目名的操作: 'new' 新建项目, 'copy' 另存为, 'rename' 重命名
+let who = '';       // 正在重命名的项目
+let sure = '';      // 删除 已经点过一次的项目, 再点一次才删除
+let list = false;   // 项目列表 展开了
+let order = [];     // 项目列表展开的那一刻排好的顺序: 当前项目在最上面, 其余按最后一次打开的时刻, 新的在上; 列表开着的时候顺序不变, 来回切换时每一行都在原地
+function openMenu() { ask = ''; sure = ''; list = false; ver.classList.add('open'); menu.classList.add('open'); drawMenu(); }
+function closeMenu() { ver.classList.remove('open'); menu.classList.remove('open'); }
+ver.addEventListener('click', () => menu.classList.contains('open') ? closeMenu() : openMenu());
+window.addEventListener('mousedown', e => { if (!menu.contains(e.target) && !ver.contains(e.target) && !$('about').contains(e.target)) closeMenu(); if (!$('about').contains(e.target)) $('about').style.display = ''; if (!paint.contains(e.target)) paint.style.display = ''; }, true);   // 单击菜单以外的地方: 菜单消失; 单击 关于 或 使用说明 以外的地方: 它们消失
+
+// 关于: 图标 名字 和 ABOUT 里填了内容的各行; 值是空的那一行不显示
+// 窗口右上角的三个按钮: 让 元素面板.exe 最小化 最大化 关闭窗口; 元素面板.exe 发来 window 或 full, 说明现在是不是全屏
+for (const b of $('win').children) b.addEventListener('click', () => host.postMessage(b.dataset.m));
+host.addEventListener('message', e => document.body.classList.toggle('window', e.data === 'window'));
+
+// 版本号: 平时只升小数点后面的数; 架构大改时才升前面的数
+const MAIL = 'muzexi888@gmail.com';
+const ABOUT = { 版本: 'V1.22', 作者: '', 开源许可协议: '', 项目主页: '' };
+// 使用说明: 一行一个操作 [ 操作, 结果 ]; 只有一项的是小标题
+const HELP = [
+  ['小圆'], ['双击空白处', '新建小圆'], ['双击小圆', '改文字'], ['左键拖动小圆', '移动'], ['选中后按 Delete', '删除'], ['右键单击选中的小圆 线条 大圆', '换颜色'],
+  ['线条'], ['右键从一个小圆拖到另一个小圆', '连线'], ['选中线条 滚轮向下', '变成箭头'], ['选中线条 滚轮向上', '变成虚线'], ['双击线条', '在线条上写小字'],
+  ['大圆'], ['左键在空白处画圈', '选中圈里的小圆'], ['画圈之后按 Enter', '给选中的小圆套上大圆'], ['双击大圆的轮廓', '写公式'], ['右键把小圆拖进大圆', '加入大圆'], ['右键拖到大圆里一个已经连着线的小圆上', '加入大圆'], ['右键把小圆拖到大圆外面', '退出大圆'],
+  ['画布'], ['右键在空白处拖动', '移动画布'], ['滚轮', '缩放'], ['空格', '回到全部小圆的中心'], ['选中几个小圆或者大圆 再按空格', '整体转 90 度'],
+  ['其他'], ['Ctrl+C  Ctrl+X  Ctrl+V', '复制 剪切 粘贴到鼠标位置'], ['Ctrl+Z  Ctrl+Y', '撤销 恢复'], ['Ctrl+S', '保存 ( 每次改动本来就当场保存 )'], ['F11', '全屏 / 普通窗口'],
+];
+function showHelp() {
+  const a = $('about');
+  closeMenu();
+  a.textContent = ''; a.className = 'help'; a.style.top = a.style.transform = '';
+  for (const [x, y] of HELP) { if (y === undefined) { a.appendChild(document.createElement('h4')).textContent = x; continue; } const d = a.appendChild(document.createElement('div')); d.className = 'do'; d.textContent = x; a.appendChild(document.createElement('div')).textContent = y; }
+  a.style.display = 'grid';
+}
+
+function showAbout() {
+  const a = $('about');
+  closeMenu();
+  a.textContent = ''; a.className = ''; a.style.top = a.style.transform = '';
+  a.appendChild(document.createElement('img')).src = '/Lib/Icon.png';
+  a.appendChild(document.createElement('b')).textContent = '元素面板';
+  for (const k in ABOUT) if (ABOUT[k]) { const d = a.appendChild(document.createElement('div')); d.appendChild(document.createElement('span')).textContent = k; d.append(ABOUT[k]); }
+  // 两个按钮: 单击一个, 下面出现这个按钮的内容; 再单击一次收起
+  const bar = a.appendChild(document.createElement('div')), more = a.appendChild(document.createElement('div'));
+  bar.className = 'acts'; more.className = 'more';
+  const act = (text, fill) => {
+    const b = bar.appendChild(document.createElement('b'));
+    b.textContent = text;
+    b.addEventListener('click', () => { const on = !b.classList.contains('on'); for (const o of bar.children) o.classList.remove('on'); more.textContent = ''; if (on) { b.classList.add('on'); fill(); } });
+  };
+  act('反馈', () => more.textContent = MAIL);
+  act('打赏', () => more.appendChild(document.createElement('img')).src = '/Lib/Reward.jpg');
+  a.style.display = 'block';
+  a.style.transform = 'translateX( -50% )';   // 上沿固定在刚出现时的位置: 邮箱和收款码出现时方框只向下变长, 上面的内容不动
+  a.style.top = (innerHeight - a.offsetHeight) / 2 + 'px';
+}
+
+// 按 ask who sure list 画出菜单; err: 显示在输入框下面的一句话, 说明项目名为什么不能用
+// 从上到下: 当前项目的名字 ( 单击展开项目列表 ), 跟项目走的开关, 新建项目, 另存为, 使用说明, 关于
+function drawMenu(err) {
+  const typed = menu.querySelector('input');
+  const keep = typed && typed.name === ask + who ? typed.value : null;   // 输入框里已经打的字, 重画之后还在
+  let box = menu;   // 正在往哪一块里加东西: 菜单本身, 或者右边的项目列表
+  const add = (tag, cls, text) => { const d = box.appendChild(document.createElement(tag)); d.className = cls; d.textContent = text; return d; };
+  const row = (text, fn, cls) => { const d = add('div', 'row ' + cls, ''); d.appendChild(document.createElement('span')).textContent = text; d.addEventListener('click', fn); return d; };
+  const input = (kind, name, hint, start) => {   // 输入项目名的输入框, 按 Enter 确定
+    const i = add('input', '', '');
+    i.name = kind + name; i.spellcheck = false; i.autocomplete = 'off'; i.placeholder = hint + '  输入项目名 按 Enter'; i.value = keep === null ? start : keep;
+    i.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) applyName(kind, name, i.value.trim()); });
+    if (err) add('div', 'err', err);
+    i.focus(); i.select();
+  };
+  const named = (text, kind, start) => ask === kind ? input(kind, '', text, start) : row(text, () => { ask = kind; who = ''; sure = ''; drawMenu(); }, '');   // 单击之后这一行变成输入框
+  menu.textContent = '';
+  add('div', list ? 'title open' : 'title', proj).addEventListener('click', () => { list = !list; ask = ''; sure = ''; order = names().sort((a, b) => (b === proj) - (a === proj) || (opened[b] || 0) - (opened[a] || 0)); drawMenu(); });   // 单击项目名: 展开或者收起项目列表
+  if (list) box = add('div', 'side', '');
+  if (list) for (const n of [...new Set([...order, ...names(), proj])].filter(n => n === proj || names().includes(n))) {   // 每个项目一行, 顺序照 order; 当前项目带绿点; 行尾是 重命名 和 删除
+    if (ask === 'rename' && who === n) { input('rename', n, '重命名', n); continue; }
+    const d = row(n, () => { if (n !== proj) openProject(n, true); }, n === proj ? 'item now' : 'item');   // 单击一个项目: 画布换成这个项目的, 菜单和项目列表不消失
+    const btn = (text, fn) => { const b = d.appendChild(document.createElement('span')); b.className = 'btn'; b.textContent = text; b.addEventListener('click', e => { e.stopPropagation(); fn(); }); };
+    btn('重命名', () => { ask = 'rename'; who = n; sure = ''; drawMenu(); });
+    btn('删除', () => askDelete(n));   // 删除之前弹出一个方框再问一次
+  }
+  box = menu;
+  row('同字同色', () => { data.same = !data.same; draw(); write(); drawMenu(); }, '').appendChild(document.createElement('span')).textContent = data.same ? '开' : '关';   // 跟项目走的开关都放在这里, 紧跟在项目名和项目列表下面
+  add('hr', '', '');
+  named('新建项目', 'new', '');
+  named('另存为', 'copy', proj + ' 副本');
+  add('hr', '', '');
+  row('使用说明', showHelp, '');
+  row('关于', showAbout, '');
+}
+
+// 新建项目 另存为 重命名 共用: 先检查项目名 name 能不能用, 再让 store 去做; old 是重命名之前的名字
+function applyName(kind, old, name) {
+  if (!name || name === old) { ask = ''; return drawMenu(); }
+  const err = /[\\/:*?"<>|]/.test(name) ? '项目名里不能有 \\ / : * ? " < > |' : /^[._]/.test(name) ? '项目名不能用 . 或 _ 开头' : name.length > 90 ? '项目名太长' : [...names(), proj].some(n => n.toLowerCase() === name.toLowerCase() && n !== old) ? '已经有同名的项目' : '';
+  if (err) return drawMenu(err);
+  commitEdit();
+  if (kind === 'new') { store.Save(name, '{}'); return openProject(name); }                              // 新建项目: 得到一个空的项目, 打开这个项目
+  if (kind === 'copy') { store.Save(name, JSON.stringify(data, null, 1)); setProj(name); return closeMenu(); }   // 另存为: 当前内容存成新项目, 之后的改动保存进新项目, 原项目不再变化
+  if (!store.Rename(old, name)) return drawMenu('已经有同名的项目');                                      // 重命名: 项目文件改名
+  opened[name] = opened[old];
+  order = order.map(n => n === old ? name : n);
+  if (old === proj) setProj(name);
+  ask = '';
+  drawMenu();
+}
+
+// 删除之前在窗口正中问一次: 取消 或者 删除
+function askDelete(name) {
+  const a = $('about'), bar = document.createElement('div');
+  a.textContent = ''; a.className = ''; a.style.top = a.style.transform = '';
+  a.appendChild(document.createElement('div')).textContent = '删除项目  ' + name + '  ?';
+  a.appendChild(bar).className = 'acts';
+  for (const [text, fn] of [['取消', () => {}], ['删除', () => removeProject(name)]]) { const b = bar.appendChild(document.createElement('b')); b.textContent = text; b.addEventListener('click', () => { a.style.display = ''; fn(); }); }
+  a.style.display = 'block';
+}
+
+// 删除项目 name; 删除的是当前项目时, 打开最近保存的另一个项目, 没有别的项目时得到一个空的 项目 1
+function removeProject(name) {
+  commitEdit();
+  store.Delete(name);
+  sure = '';
+  if (name === proj) openProject(names()[0] || '项目 1', true); else drawMenu();
+}
+
+// 打开窗口: 上一次关窗口时的项目还在就打开这个项目, 否则打开最近保存的项目; 一个项目都没有时得到一个空的 项目 1
+openProject(names().includes(localStorage.project) ? localStorage.project : names()[0] || '项目 1');
+</script>
+</body>
+</html>
